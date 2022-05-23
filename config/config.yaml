@@ -1,0 +1,150 @@
+---
+storage:
+  files:
+    - path: /etc/hostname
+      filesystem: root
+      mode: 0644
+      contents:
+        inline: ${hostname}
+
+    - path: /etc/systemd/resolved.conf.d/00-default-dns-servers.conf
+      filesystem: root
+      mode: 0644
+      contents:
+        inline: |
+          [Resolve]
+          DNS=${dns_servers}
+
+    - path: /etc/flatcar/update.conf
+      filesystem: root
+      mode: 0644
+      contents:
+        inline: |
+          GROUP=${update_group}
+          SERVER=${update_server}
+          MACHINE_ALIAS=${hostname}
+          REBOOT_STRATEGY=reboot
+
+    - path: /etc/modules-load.d/k8s.conf
+      mode: 0644
+      contents:
+        inline: |
+          br_netfilter
+
+    - path: /etc/sysctl.d/k8s.conf
+      filesystem: root
+      mode: 0644
+      contents:
+        inline: |
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.bridge.bridge-nf-call-iptables = 1
+          fs.inotify.max_user_watches=1048576
+          fs.inotify.max_user_instances=16184
+          vm.max_map_count=262144
+          user.max_user_namespaces=0
+
+    - path: /etc/crictl.yaml
+      filesystem: root
+      mode: 0644
+      contents:
+        inline: |
+          runtime-endpoint: unix:///run/containerd/containerd.sock
+
+    - path: /opt/bin/reprovision
+      filesystem: root
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          set -euo pipefail
+          touch /usr/share/oem/grub.cfg
+          sed -i "/linux_append systemd.machine_id=.*/d" /usr/share/oem/grub.cfg
+          echo "set linux_append=\"\$linux_append systemd.machine_id=$(cat /etc/machine-id)\"" >> /usr/share/oem/grub.cfg
+          touch /boot/flatcar/first_boot
+
+    - path: /opt/sbin/get-metadata.sh
+      filesystem: root
+      mode: 0755
+      contents:
+        inline: |
+          #!/usr/bin/env sh
+
+          metadata_result=$(curl --silent 169.254.169.254/v1.json)
+          core_home=$(getent passwd core | cut -d: -f6)
+          auth_keys_path="$${core_home}/.ssh/authorized_keys"
+
+          echo $metadata_result | jq -r '."public-keys"[]' > $auth_keys_path
+          chmod 600 $auth_keys_path
+          chown core:core $auth_keys_path
+
+          cat << EOF > /run/metadata/flatcar
+          COREOS_CUSTOM_HOSTNAME=$(echo $metadata_result | jq -r '.hostname')
+          COREOS_CUSTOM_PRIVATE_IPV4=$(echo $metadata_result | jq -r '.interfaces[]|select(."network-type"=="private").ipv4.address')
+          COREOS_CUSTOM_PRIVATE_IPV6=$(echo $metadata_result | jq -r '.interfaces[]|select(."network-type"=="private").ipv6.address')
+          COREOS_CUSTOM_PUBLIC_IPV4=$(echo $metadata_result | jq -r '.interfaces[]|select(."network-type"=="public").ipv4.address')
+          COREOS_CUSTOM_PUBLIC_IPV6=$(echo $metadata_result | jq -r '.interfaces[]|select(."network-type"=="public").ipv6.address')
+          EOF
+
+#########################################################################
+networkd:
+  units:
+    - name: 00-eth0.network
+      contents: |
+        [Match]
+        Name=eth0
+
+        [Network]
+        DHCP=yes
+
+        [DHCPv4]
+        UseDNS=no
+
+        [DHCPv6]
+        UseDNS=no
+
+#########################################################################
+systemd:
+  units:
+    - name: update-engine.service
+      enabled: true
+
+    - name: locksmithd.service
+      mask: true
+
+    - name: containerd.service
+      enabled: true
+
+    - name: docker.socket
+      mask: true
+
+    - name: docker.service
+      mask: true
+
+    - name: private-network.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Create Private Network
+        Requires=coreos-metadata.service
+        After=coreos-metadata.service
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=true
+        StandardOutput=journal
+        EnvironmentFile=/run/metadata/flatcar
+        ExecStart=/bin/sh -c 'printf "[Match]\nName=eth1\n[Address]\nAddress=$${COREOS_CUSTOM_PRIVATE_IPV4}/${v4_subnet_mask}" > /etc/systemd/network/private.network'
+        ExecStartPost=/usr/bin/systemctl restart systemd-networkd.service
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: coreos-metadata.service
+      enabled: true
+      dropins:
+        - name: use-script.conf
+          contents: |
+            [Service]
+            # Empty ExecStart= prevents the previously defined ExecStart from running
+            ExecStart=
+            ExecStart=/opt/sbin/get-metadata.sh
