@@ -38,40 +38,40 @@ variable "firewall_group_id" {
 }
 
 variable "ssh_key_ids" {
-  description = "A name for your cluster."
   type        = list(string)
+  description = "A list of SSH key IDs"
 }
 
 variable "vpc_ids" {
-  description = "List of VPC IDs to attach to the instance"
   type        = list(string)
+  description = "List of VPC IDs to attach to the instance"
 }
 
 variable "private_network_netmask" {
-  description = "A name for your cluster."
   type        = string
+  description = "Netmask of the private network attached to the instance"
 }
 
 variable "script_id" {
-  description = "The ID of the startup script of the instance"
   type        = string
+  description = "The ID of the startup script of the instance"
 }
 
 variable "region" {
-  description = "Vultr deployment region."
   type        = string
+  description = "Vultr deployment region."
   default     = "lhr"
 }
 
 variable "enable_ipv6" {
-  description = "Cluster IPv6 for future use NOT CURRENTLY SUPPORTED."
   type        = bool
+  description = "Enable IPv6 on the instance"
   default     = false
 }
 
 variable "ddos_protection" {
-  description = "Enable/disable cluster node DDOS Protection."
   type        = bool
+  description = "Enable/disable node DDOS Protection."
   default     = false
 }
 
