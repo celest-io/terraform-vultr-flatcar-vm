@@ -16,7 +16,7 @@ data "ct_config" "node" {
     dns_servers    = join(" ", var.dns_servers)
   })
   platform = "custom"
-  snippets = var.clc_snippets
+  snippets = var.snippets
 }
 
 resource "vultr_instance" "node" {
