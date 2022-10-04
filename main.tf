@@ -6,6 +6,7 @@ data "vultr_os" "custom" {
 }
 
 data "ct_config" "node" {
+  strict       = true
   pretty_print = false
   content = templatefile("${path.module}/config/config.yaml", {
     hostname       = var.node_name
